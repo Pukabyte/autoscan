@@ -28,7 +28,7 @@ func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
 }
 
 func (c apiClient) do(req *http.Request) (*http.Response, error) {
-	req.Header.Set("X-Emby-Token", c.token)
+	req.Header.Set("Authorization", fmt.Sprintf("MediaBrowser Token=\"%s\"", c.token))
 	req.Header.Set("Accept", "application/json") // Force JSON Response.
 
 	res, err := c.client.Do(req)
