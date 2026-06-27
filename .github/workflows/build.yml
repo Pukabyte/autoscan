@@ -13,6 +13,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     steps:
       # dependencies
       - name: goreleaser
@@ -117,11 +120,8 @@ jobs:
       # docker login
       - name: docker login
         if: github.event.pull_request.head.repo.fork == false
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          echo "${DOCKER_PASSWORD}" | docker login --username "${DOCKER_USERNAME}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
 
       # docker build (latest & tag)
       - name: release tag
@@ -143,8 +143,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            saltydk/autoscan:${{ steps.releasetag.outputs.tag }}
-            saltydk/autoscan:latest
+            ghcr.io/pukabyte/autoscan:${{ steps.releasetag.outputs.tag }}
+            ghcr.io/pukabyte/autoscan:latest
 
       # docker build (branch)
       - name: branch name
@@ -174,7 +174,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            saltydk/autoscan:${{ steps.dockertag.outputs.replaced }}
+            ghcr.io/pukabyte/autoscan:${{ steps.dockertag.outputs.replaced }}
 
       # cleanup
       - name: cleanup
