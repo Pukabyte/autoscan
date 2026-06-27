@@ -201,4 +201,31 @@ func (store *datastore) CompleteScanTarget(folder, targetID string) error {
 	return nil
 }
 
+const sqlPushScanToBack = `UPDATE scan SET time = ? WHERE folder = ?`
+
+// PushScanToBack resets a scan's time to now so it re-enters the minimum-age
+// queue, allowing other scans to advance when all targets for this scan fail.
+func (store *datastore) PushScanToBack(folder string) error {
+	_, err := store.Exec(sqlPushScanToBack, now(), folder)
+	if err != nil {
+		return fmt.Errorf("push scan to back: %s: %w", err, autoscan.ErrFatal)
+	}
+	return nil
+}
+
+const sqlEnsureTargetInAllScans = `
+INSERT OR IGNORE INTO scan_target (folder, target_id)
+SELECT folder, ? FROM scan
+`
+
+// EnsureTargetInAllScans inserts a pending scan_target row for the given target
+// across all existing scans that don't already have one.
+func (store *datastore) EnsureTargetInAllScans(targetID string) error {
+	_, err := store.Exec(sqlEnsureTargetInAllScans, targetID)
+	if err != nil {
+		return fmt.Errorf("ensure target in all scans: %s: %w", err, autoscan.ErrFatal)
+	}
+	return nil
+}
+
 var now = time.Now

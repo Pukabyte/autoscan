@@ -51,11 +51,17 @@ type Processor struct {
 }
 
 // Register sets the targets the processor will dispatch scans to.
-// Must be called before triggers start adding scans.
+// Backfills scan_target rows for any existing pending scans so newly added
+// targets don't miss in-progress work. Safe to call before triggers start.
 func (p *Processor) Register(targets []RegisteredTarget) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.targets = targets
+	for _, t := range targets {
+		if err := p.store.EnsureTargetInAllScans(t.ID); err != nil {
+			log.Warn().Err(err).Str("target", t.ID).Msg("Failed to backfill scan_target rows for target")
+		}
+	}
 }
 
 func (p *Processor) targetIDs() []string {
@@ -95,6 +101,7 @@ func (p *Processor) ScansProcessed() int64 {
 }
 
 // CheckAvailability returns nil if at least one registered target is reachable.
+// Logs a warning per unavailable target so the operator can see exactly what is down.
 func (p *Processor) CheckAvailability() error {
 	p.mu.RLock()
 	targets := p.targets
@@ -105,6 +112,7 @@ func (p *Processor) CheckAvailability() error {
 		if err := t.Target.Available(); err == nil {
 			return nil
 		} else {
+			log.Warn().Err(err).Str("target", t.ID).Msg("Target unavailable")
 			lastErr = err
 		}
 	}
@@ -187,6 +195,10 @@ func (p *Processor) Process() error {
 	}
 
 	if !anySuccess && anyFailure {
+		// Push scan to back of queue so other scans can advance while this one's targets recover.
+		if err := p.store.PushScanToBack(scan.Folder); err != nil {
+			log.Warn().Err(err).Str("folder", scan.Folder).Msg("Failed to push scan to back of queue")
+		}
 		return fmt.Errorf("all pending targets failed for %s: %w", scan.Folder, autoscan.ErrTargetUnavailable)
 	}
 

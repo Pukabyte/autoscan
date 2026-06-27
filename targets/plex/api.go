@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -21,7 +22,7 @@ type apiClient struct {
 
 func newAPIClient(baseURL string, token string, log zerolog.Logger) *apiClient {
 	return &apiClient{
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: 30 * time.Second},
 		log:     log,
 		baseURL: baseURL,
 		token:   token,
