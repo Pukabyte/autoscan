@@ -276,7 +276,7 @@ func main() {
 		Msg("Initialised triggers")
 
 	// targets
-	targets := make([]autoscan.Target, 0)
+	registeredTargets := make([]processor.RegisteredTarget, 0)
 
 	for _, t := range c.Targets.Autoscan {
 		tp, err := ast.New(t)
@@ -288,7 +288,7 @@ func main() {
 				Msg("Failed initialising target")
 		}
 
-		targets = append(targets, tp)
+		registeredTargets = append(registeredTargets, processor.RegisteredTarget{ID: "autoscan:" + t.URL, Target: tp})
 	}
 
 	for _, t := range c.Targets.Plex {
@@ -301,7 +301,7 @@ func main() {
 				Msg("Failed initialising target")
 		}
 
-		targets = append(targets, tp)
+		registeredTargets = append(registeredTargets, processor.RegisteredTarget{ID: "plex:" + t.URL, Target: tp})
 	}
 
 	for _, t := range c.Targets.Emby {
@@ -314,7 +314,7 @@ func main() {
 				Msg("Failed initialising target")
 		}
 
-		targets = append(targets, tp)
+		registeredTargets = append(registeredTargets, processor.RegisteredTarget{ID: "emby:" + t.URL, Target: tp})
 	}
 
 	for _, t := range c.Targets.Jellyfin {
@@ -327,8 +327,10 @@ func main() {
 				Msg("Failed initialising target")
 		}
 
-		targets = append(targets, tp)
+		registeredTargets = append(registeredTargets, processor.RegisteredTarget{ID: "jellyfin:" + t.URL, Target: tp})
 	}
+
+	proc.Register(registeredTargets)
 
 	log.Info().
 		Int("autoscan", len(c.Targets.Autoscan)).
@@ -350,8 +352,7 @@ func main() {
 	// processor
 	log.Info().Msg("Processor started")
 
-	targetsAvailable := false
-	targetsSize := len(targets)
+	targetsSize := len(registeredTargets)
 	for {
 		// sleep indefinitely when no targets setup
 		if targetsSize == 0 {
@@ -359,72 +360,30 @@ func main() {
 			select {}
 		}
 
-		// target availability checker
-		if !targetsAvailable {
-			err = proc.CheckAvailability(targets)
-			switch {
-			case err == nil:
-				targetsAvailable = true
-			case errors.Is(err, autoscan.ErrFatal):
-				log.Error().
-					Err(err).
-					Msg("Fatal error occurred while checking target availability, processor stopped, triggers will continue...")
-
-				// sleep indefinitely
-				select {}
-			default:
-				log.Error().
-					Err(err).
-					Msg("Not all targets are available, retrying in 15 seconds...")
-
-				time.Sleep(15 * time.Second)
-				continue
-			}
-		}
-
-		// process scans
-		err = proc.Process(targets)
+		// process scans — each target tracked independently; partial failures retry next tick
+		err = proc.Process()
 		switch {
 		case err == nil:
-			// Sleep scan-delay between successful requests to reduce the load on targets.
 			time.Sleep(c.ScanDelay)
 
 		case errors.Is(err, autoscan.ErrNoScans):
-			// No scans currently available, let's wait a couple of seconds
-			log.Trace().
-				Msg("No scans are available, retrying in 15 seconds...")
-
+			log.Trace().Msg("No scans are available, retrying in 15 seconds...")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrAnchorUnavailable):
-			log.Error().
-				Err(err).
-				Msg("Not all anchor files are available, retrying in 15 seconds...")
-
+			log.Error().Err(err).Msg("Not all anchor files are available, retrying in 15 seconds...")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrTargetUnavailable):
-			targetsAvailable = false
-			log.Error().
-				Err(err).
-				Msg("Not all targets are available, retrying in 15 seconds...")
-
+			log.Error().Err(err).Msg("All pending targets failed for scan, retrying in 15 seconds...")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrFatal):
-			// fatal error occurred, processor must stop (however, triggers must not)
-			log.Error().
-				Err(err).
-				Msg("Fatal error occurred while processing targets, processor stopped, triggers will continue...")
-
-			// sleep indefinitely
+			log.Error().Err(err).Msg("Fatal error occurred while processing targets, processor stopped, triggers will continue...")
 			select {}
 
 		default:
-			// unexpected error
-			log.Fatal().
-				Err(err).
-				Msg("Failed processing targets")
+			log.Fatal().Err(err).Msg("Failed processing targets")
 		}
 	}
 }

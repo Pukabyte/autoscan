@@ -131,12 +131,73 @@ const sqlDelete = `
 DELETE FROM scan WHERE folder=?
 `
 
+const sqlDeleteScanTargets = `
+DELETE FROM scan_target WHERE folder=?
+`
+
+const sqlInsertScanTarget = `
+INSERT OR IGNORE INTO scan_target (folder, target_id) VALUES (?, ?)
+`
+
+const sqlGetPendingTargetIDs = `
+SELECT target_id FROM scan_target WHERE folder = ?
+`
+
+const sqlCompleteScanTarget = `
+DELETE FROM scan_target WHERE folder = ? AND target_id = ?
+`
+
 func (store *datastore) Delete(scan autoscan.Scan) error {
-	_, err := store.Exec(sqlDelete, scan.Folder)
+	tx, err := store.Begin()
 	if err != nil {
-		return fmt.Errorf("delete: %s: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("delete begin: %s: %w", err, autoscan.ErrFatal)
 	}
 
+	if _, err := tx.Exec(sqlDeleteScanTargets, scan.Folder); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete scan_targets: %s: %w", err, autoscan.ErrFatal)
+	}
+
+	if _, err := tx.Exec(sqlDelete, scan.Folder); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete scan: %s: %w", err, autoscan.ErrFatal)
+	}
+
+	return tx.Commit()
+}
+
+func (store *datastore) InsertScanTargets(folder string, targetIDs []string) error {
+	for _, id := range targetIDs {
+		if _, err := store.Exec(sqlInsertScanTarget, folder, id); err != nil {
+			return fmt.Errorf("insert scan_target: %s: %w", err, autoscan.ErrFatal)
+		}
+	}
+	return nil
+}
+
+func (store *datastore) GetPendingTargetIDs(folder string) ([]string, error) {
+	rows, err := store.Query(sqlGetPendingTargetIDs, folder)
+	if err != nil {
+		return nil, fmt.Errorf("get pending targets: %s: %w", err, autoscan.ErrFatal)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan pending target: %s: %w", err, autoscan.ErrFatal)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (store *datastore) CompleteScanTarget(folder, targetID string) error {
+	_, err := store.Exec(sqlCompleteScanTarget, folder, targetID)
+	if err != nil {
+		return fmt.Errorf("complete scan_target: %s: %w", err, autoscan.ErrFatal)
+	}
 	return nil
 }
 
